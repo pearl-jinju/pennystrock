@@ -28,6 +28,102 @@ import pandas as pd
 import ta
 
 
+# pickle
+import pickle
+
+
+def stock_basic_data(stock_ticker, stock_name,array=False):
+    stock_df = yf.download(stock_ticker, period='max',progress=False).reset_index()
+
+    # StockPriceData.objects.all().delete()
+    # 조기 종료1. 데이터의 무존재
+    if len(stock_df)==0:
+        stock_df = None
+        return stock_df
+    
+
+    
+    # 1. 기본 주가데이터==============================
+    
+    # 이중인덱스 제거
+    stock_df.columns = stock_df.columns.droplevel(1)
+    # 이름과 티커 넣기
+    stock_df.insert(0, 'ticker', stock_ticker)
+    stock_df.insert(0, 'name', stock_name)
+
+    # 시고저종,거래량 % 
+    stock_df['Close_rate'] = round((stock_df['Close']/stock_df['Close'].shift(1)-1)*100,2)
+    stock_df['High_rate'] =  round((stock_df['High']/stock_df['High'].shift(1)-1)*100,2)
+    stock_df['Low_rate'] =  round((stock_df['Low']/stock_df['Low'].shift(1)-1)*100,2)
+    stock_df['Open_rate'] =  round((stock_df['Open']/stock_df['Open'].shift(1)-1)*100,2)
+    stock_df['Volume_rate'] =  round((stock_df['Volume']/stock_df['Volume'].shift(1)-1)*100,2)
+
+
+    # 2. 기술적분석 주가데이터(당일 기술적 분석 데이터가 아니라 전일 데이터를 사용)==============================
+    # 이동평균선은 주가에 반영되어있으므로 제외한다.
+    # --MACD OSC
+    macd = ta.trend.MACD(close=stock_df['Close'])
+    for i in range(1,6):
+        stock_df[f'MACD_signal_{i}'] = macd.macd_signal().shift(i)
+    for i in range(1,6):
+        stock_df[f'MACD_diff{i}'] = macd.macd_diff().shift(i)
+
+    # --RSI
+    rsi_indicator = ta.momentum.RSIIndicator(close=stock_df['Close'], window=14)
+    for i in range(1,6):
+        stock_df[f'RSI_{i}'] = rsi_indicator.rsi().shift(i)
+
+    # # --Bolinger Band
+    bollinger = ta.volatility.BollingerBands(close=stock_df['Close'], window=20, window_dev=2)
+    for i in range(1,6):
+        stock_df[f'Bollinger_High_{i}'] = bollinger.bollinger_hband().shift(i)/stock_df['Close'].shift(i)
+    for i in range(1,6):
+        stock_df[f'Bollinger_Low_{i}'] = bollinger.bollinger_lband().shift(i)/stock_df['Close'].shift(i)
+
+
+    # --Stochastic
+    stochastic = ta.momentum.StochasticOscillator(
+        high=stock_df['High'],
+        low=stock_df['Low'],
+        close=stock_df['Close'],
+        window=14,
+        smooth_window=3
+        )
+    for i in range(1,6):
+        stock_df[f'Stochastic_K_{i}'] = stochastic.stoch().shift(i)
+    for i in range(1,6):
+        stock_df[f'Stochastic_D_{i}'] = stochastic.stoch_signal().shift(i)
+
+    # --Parabolic SAR
+    psar = ta.trend.PSARIndicator(
+        high=stock_df['High'],
+        low=stock_df['Low'],
+        close=stock_df['Close'],
+        step=0.02,
+        max_step=0.18
+    )
+    for i in range(1,6):
+        stock_df[f'PSAR_{i}'] = psar.psar().shift(i)/stock_df['Close'].shift(i)
+
+    # market Data 추가
+    # 시작데이터 가져오기
+    loaded_df = pd.read_pickle("market_data.pkl")
+    loaded_df = loaded_df.reset_index()
+    loaded_df['Date']=loaded_df['Date'].apply(lambda x : str(x)[:10])
+
+    stock_df['Date']=stock_df['Date'].apply(lambda x : str(x)[:10])
+
+    stock_df = pd.concat([stock_df.set_index('Date'), loaded_df.set_index('Date')], axis=1, join='inner').dropna()
+
+    stock_df = stock_df.reset_index()
+
+    stock_df = stock_df.dropna()
+
+    if array == True:
+        return stock_df.iloc[-1:,:]
+    else:
+        return stock_df
+
 class SaveData(APIView):
     """
     티커 정보 최신화 기능
@@ -126,161 +222,94 @@ class GetData(APIView):
             name = "Unknown Ticker"
 
         # 주가 데이터 가져오기
-        data = StockPriceData.objects.filter(ticker__iexact=ticker).order_by('-date')[:30]
-        if not data.exists():
-            return Response({
-                'ticker': ticker,
-                'name': name,
-                'data': []
-            }, status=200)
-
+        loaded_df = pd.read_pickle("stock_data.pkl")
+        
+        print(loaded_df)
+        
         # 결과 구성
-        result = [
-            {
-                'date': stock.date.strftime('%Y-%m-%d'),
-                'open': round(stock.open, 4),
-                'high': round(stock.high, 4),
-                'low': round(stock.low, 4),
-                'close': round(stock.close, 4),
-                'volume': stock.volume,
-                'ema_112': round(stock.ema_112, 4) if stock.ema_112 else None,
-                'ema_224': round(stock.ema_224, 4) if stock.ema_224 else None,
-                'macd': round(stock.macd, 4) if stock.macd else None,
-                'macd_signal': round(stock.macd_signal, 4) if stock.macd_signal else None,
-                'rsi_14': round(stock.rsi_14, 4) if stock.rsi_14 else None,
-                'bollinger_high': round(stock.bollinger_high, 4) if stock.bollinger_high else None,
-                'bollinger_low': round(stock.bollinger_low, 4) if stock.bollinger_low else None,
-                'stochastic_k': round(stock.stochastic_k, 4) if stock.stochastic_k else None,
-                'stochastic_d': round(stock.stochastic_d, 4) if stock.stochastic_d else None,
-            }
-            for stock in data
+ 
+        return Response({}, status=200)
+
+class MarketData(APIView):
+    def get(self, request): 
+        """
+        시장지표 데이터 저장
+        """
+        #  시장지표
+        market_index = [
+            'VIXM', 'VIXY', 'BND', 'BLV', 'BIV', 'BSV',
+            'VTIP', 'GLD', 'USDU', 'VNQ', 'KBWY'
         ]
 
-        return Response({'ticker': ticker, 'name': name, 'data': result})
+        result_df = None  # 처음에는 None으로 설정
 
+        for market in market_index:
+            df = yf.download(market, period='max', progress=False).reset_index()
+
+            # 다중 인덱스 컬럼 확인 후 처리
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
+
+            # 과거 5일간 수익률 계산
+            for i in range(1, 6):
+                df[f'{market}_{i}'] = (((df['Close'] / df['Close'].shift(1)) - 1) * 100).shift(i)
+
+            # 필요한 컬럼만 선택
+            temp_ls = [f'{market}_{i}' for i in range(1, 6)]
+            temp_ls.insert(0, "Date")
+            df = df[temp_ls].set_index('Date')
+
+            # 첫 번째 루프에서는 바로 할당, 이후에는 concat
+            if result_df is None:
+                result_df = df
+            else:
+                result_df = pd.concat([result_df, df], axis=1)
+
+        # 최종적으로 reset_index() 한 번만 실행
+        # result_df = result_df.reset_index().dropna()
+        # pickle로 저장
+        result_df.to_pickle("market_data.pkl")
+
+        return JsonResponse({}, status=200)
 
 class TechData(APIView):
     """
     종목별 가격정보를 가져옴
     """
     def get(self, request): 
-        db_list = StockData.objects.filter(last_price__gt=1.0, last_price__lte=5.0).only('ticker')
-        
-        ticker_list = []
-        name_list = []
-        for db in db_list:
-            ticker_list.append(db.ticker)
-            name_list.append(db.name)
 
-        # print(len(ticker_list))
         
+        # db_list = StockData.objects.filter(last_price__gt=1.0, last_price__lte=5.0).only('ticker')
+        
+        # ticker_list = []
+        # name_list = []
+        # for db in db_list:
+        #     ticker_list.append(db.ticker)
+        #     name_list.append(db.name)
+
+        ticker_list = ["BB"]
+        name_list = ["Black_berry"]
+        result_df = None  # 처음에는 None으로 설정
+
         for stock_ticker, stock_name in tqdm(zip(ticker_list,name_list)):
                 
-            stock_df = yf.download(stock_ticker, period='max',progress=False).reset_index()
+            stock_df = stock_basic_data(stock_ticker, stock_name,array=False)
 
-            # StockPriceData.objects.all().delete()
-            # 조기 종료1. 데이터의 무존재
-            if len(stock_df)==0:
-                continue
+# 예측데이터 생성
+            for i in range(1,6):
+                stock_df[f'period_yield_{i}'] = ((stock_df['Close'].shift(-i)/stock_df['Close'])-1)*100
+
+            if result_df is None:
+                result_df = stock_df
+            else:
+                result_df = pd.concat([result_df, stock_df], axis=0)
+
+            result_df = result_df.dropna()
+
             
-            
-            # 조기 종료2. 기존의 DB에 있는경우
-            if StockPriceData.objects.filter(name= stock_name,date=stock_df['Date'].iloc[-1]).count() >= 1:
-                print("이미 최신 정보입니다.")
-                continue
 
-            # 조기종료3. 최소 3년 이상의 데이터 검증 필요
-            if len(stock_df) < 224*3:
-                print("주가 정보가 너무 적음, 최소 3년이상의 데이터 필요")
-                continue
+        result_df.to_pickle("stock_data.pkl")
 
-            # 이중인덱스 제거
-            stock_df.columns = stock_df.columns.droplevel(1)
-            # 주가 분석 지표 생성
-            # --지수이동평균선 (최대 3년까지 )
-            stock_df['EMA_112'] = ta.trend.ema_indicator(close=stock_df['Close'], window=112)
-            stock_df['EMA_224'] = ta.trend.ema_indicator(close=stock_df['Close'], window=224)
-            stock_df['EMA_448'] = ta.trend.ema_indicator(close=stock_df['Close'], window=448)
-            stock_df['EMA_672'] = ta.trend.ema_indicator(close=stock_df['Close'], window=672)
-
-            # --MACD OSC
-            macd = ta.trend.MACD(close=stock_df['Close'])
-            stock_df['MACD'] = macd.macd()
-            stock_df['MACD_signal'] = macd.macd_signal()
-            stock_df['MACD_diff'] = macd.macd_diff()
-
-            # --RSI
-            rsi_indicator = ta.momentum.RSIIndicator(close=stock_df['Close'], window=14)
-            stock_df['RSI_14'] = rsi_indicator.rsi()
-
-
-            # --Bolinger Band
-            bollinger = ta.volatility.BollingerBands(close=stock_df['Close'], window=20, window_dev=2)
-            stock_df['Bollinger_High'] = bollinger.bollinger_hband()
-            stock_df['Bollinger_Low'] = bollinger.bollinger_lband()
-
-            # --Stochastic
-            stochastic = ta.momentum.StochasticOscillator(
-                high=stock_df['High'],
-                low=stock_df['Low'],
-                close=stock_df['Close'],
-                window=14,
-                smooth_window=3
-                )
-            stock_df['Stochastic_K'] = stochastic.stoch()
-            stock_df['Stochastic_D'] = stochastic.stoch_signal()
-
-            # --Parabolic SAR
-            psar = ta.trend.PSARIndicator(
-                high=stock_df['High'],
-                low=stock_df['Low'],
-                close=stock_df['Close'],
-                step=0.02,
-                max_step=0.18
-            )
-            stock_df['PSAR'] = psar.psar()
-
-            # --OBV
-            obv = ta.volume.OnBalanceVolumeIndicator(close=stock_df['Close'], volume=stock_df['Volume'])
-            stock_df['OBV'] = obv.on_balance_volume()
-            
-            # 결측치 모두 제거
-            stock_df.dropna(inplace=True)
-            # 이름과 티커 넣기
-            stock_df.insert(0, 'ticker', stock_ticker)
-            stock_df.insert(0, 'name', stock_name)
-
-
-            stock_objects = [
-            StockPriceData(
-                name=row['name'],
-                ticker=row['ticker'],
-                date=row['Date'],
-                close=row['Close'],
-                high=row['High'],
-                low=row['Low'],
-                open=row['Open'],
-                volume=row['Volume'],
-                ema_112=row['EMA_112'],
-                ema_224=row['EMA_224'],
-                ema_448=row['EMA_448'],
-                ema_672=row['EMA_672'],
-                macd=row['MACD'],
-                macd_signal=row['MACD_signal'],
-                macd_diff=row['MACD_diff'],
-                rsi_14=row['RSI_14'],
-                bollinger_high=row['Bollinger_High'],
-                bollinger_low=row['Bollinger_Low'],
-                stochastic_k=row['Stochastic_K'],
-                stochastic_d=row['Stochastic_D'],
-                psar=row['PSAR'],
-                obv=row['OBV'],
-            )
-            for index, row in stock_df.iterrows()
-        ]
-
-            # bulk_create를 사용하여 데이터 삽입 (중복은 무시)
-            StockPriceData.objects.bulk_create(stock_objects, ignore_conflicts=True)
 
         return JsonResponse({}, status=200)
 
@@ -290,12 +319,13 @@ class TickerNameLoad(APIView):
     현재 확보한 데이터의 이름과 티커를 가져옴
     """
     def get(self, request): 
+        
         TickerName.objects.all().delete()
-        ticker_data = list(StockPriceData.objects.values_list('ticker', flat=True).distinct())
-        ticker_data = list(dict.fromkeys(ticker_data))
+        loaded_df = pd.read_pickle("stock_data.pkl")
+        loaded_df = loaded_df[['name','ticker']]
+        name_data = loaded_df['name'].unique().tolist()
+        ticker_data = loaded_df['ticker'].unique().tolist()
 
-        name_data = list(StockPriceData.objects.values_list('name', flat=True).distinct())
-        name_data = list(dict.fromkeys(name_data))
 
 
         if len(ticker_data) != len(name_data):

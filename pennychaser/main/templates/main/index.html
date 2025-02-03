@@ -94,8 +94,9 @@
 
     <div id="data-buttons">
         <button id="fetch-data-btn">1. Ticker Data Load</button>
-        <button id="tech-data-btn">2. Stock Price Tech Data Load</button>
-        <button id="ticker-name-data-btn">3. Ticker/Name Load</button>
+        <button id="market-data-btn">2. Market Data Load</button>
+        <button id="tech-data-btn">3. Stock Price Tech Data Load</button>
+        <button id="ticker-name-data-btn">4. Ticker/Name Load</button>
     </div>
 
     <div id="stock-data">
@@ -120,10 +121,6 @@
             const autocompleteResults = document.getElementById('autocomplete-results');
             const analysisButton = document.getElementById('analysis-data-btn');
             const stockName = document.getElementById('stock-name');
-            const closePriceCanvas = document.getElementById('close-price-chart');
-            const macdCanvas = document.getElementById('macd-chart');
-            const rsiCanvas = document.getElementById('rsi-chart');
-            const stochasticCanvas = document.getElementById('stochastic-chart');
 
             let closePriceChart, macdChart, rsiChart, stochasticChart;
 
@@ -151,215 +148,16 @@
                 }
             });
 
-            // 주식 분석 버튼 클릭 이벤트
-            analysisButton.addEventListener('click', function () {
-                const ticker = stockSymbolInput.value.trim().toUpperCase();
-
-                if (!ticker) {
-                    alert('주식 티커를 입력하세요!');
-                    return;
-                }
-
-                // API 호출
-                fetch(`/get-data/?ticker=${ticker}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            alert(data.error);
-                            return;
-                        }
-
-                        // 종목 이름 설정
-                        stockName.textContent = `${data.name} (${data.ticker})`;
-
-                        // 각 차트 업데이트
-                        updateClosePriceChart(data.data);
-                        updateMACDChart(data.data);
-                        updateRSIChart(data.data);
-                        updateStochasticChart(data.data);
-                    })
-                    .catch(error => {
-                        console.error('Error fetching stock data:', error);
-                        alert('데이터를 가져오는 데 실패했습니다.');
-                    });
-            });
-
-            // 차트 업데이트 함수들
-            function updateClosePriceChart(data) {
-                const labels = data.map(item => item.date).reverse();
-                const prices = data.map(item => item.close).reverse();
-
-                if (!closePriceChart) {
-                    const ctx = closePriceCanvas.getContext('2d');
-                    closePriceChart = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: '종가 (Close Price)',
-                                    data: prices,
-                                    borderColor: 'blue',
-                                    backgroundColor: 'rgba(0, 0, 255, 0.1)',
-                                    fill: true,
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: { position: 'top' },
-                            },
-                            scales: {
-                                y: { title: { display: true, text: 'Value' } },
-                                x: { title: { display: true, text: 'Date' } },
-                            },
-                        },
-                    });
-                } else {
-                    closePriceChart.data.labels = labels;
-                    closePriceChart.data.datasets[0].data = prices;
-                    closePriceChart.update();
-                }
-            }
-
-            function updateMACDChart(data) {
-                const labels = data.map(item => item.date).reverse();
-                const macd = data.map(item => item.macd).reverse();
-                const macdSignal = data.map(item => item.macd_signal).reverse();
-
-                if (!macdChart) {
-                    const ctx = macdCanvas.getContext('2d');
-                    macdChart = new Chart(ctx, {
-                        type: 'bar', // 막대 차트로 변경
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: 'MACD',
-                                    data: macd,
-                                    backgroundColor: 'rgba(0, 255, 0, 0.5)',
-                                },
-                                {
-                                    label: 'MACD Signal',
-                                    data: macdSignal,
-                                    backgroundColor: 'rgba(255, 0, 0, 0.5)',
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: { position: 'top' },
-                            },
-                            scales: {
-                                y: { title: { display: true, text: 'Value' } },
-                                x: { title: { display: true, text: 'Date' } },
-                            },
-                        },
-                    });
-                } else {
-                    macdChart.data.labels = labels;
-                    macdChart.data.datasets[0].data = macd;
-                    macdChart.data.datasets[1].data = macdSignal;
-                    macdChart.update();
-                }
-            }
-
-            function updateRSIChart(data) {
-                const labels = data.map(item => item.date).reverse();
-                const rsi = data.map(item => item.rsi_14).reverse();
-
-                if (!rsiChart) {
-                    const ctx = rsiCanvas.getContext('2d');
-                    rsiChart = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: 'RSI 14',
-                                    data: rsi,
-                                    borderColor: 'purple',
-                                    fill: false,
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: { position: 'top' },
-                            },
-                            scales: {
-                                y: { title: { display: true, text: 'Value' } },
-                                x: { title: { display: true, text: 'Date' } },
-                            },
-                        },
-                    });
-                } else {
-                    rsiChart.data.labels = labels;
-                    rsiChart.data.datasets[0].data = rsi;
-                    rsiChart.update();
-                }
-            }
-
-            function updateStochasticChart(data) {
-                const labels = data.map(item => item.date).reverse();
-                const stochasticK = data.map(item => item.stochastic_k).reverse();
-                const stochasticD = data.map(item => item.stochastic_d).reverse();
-
-                if (!stochasticChart) {
-                    const ctx = stochasticCanvas.getContext('2d');
-                    stochasticChart = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: 'Stochastic K',
-                                    data: stochasticK,
-                                    borderColor: 'orange',
-                                    fill: false,
-                                },
-                                {
-                                    label: 'Stochastic D',
-                                    data: stochasticD,
-                                    borderColor: 'brown',
-                                    fill: false,
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: { position: 'top' },
-                            },
-                            scales: {
-                                y: { title: { display: true, text: 'Value' } },
-                                x: { title: { display: true, text: 'Date' } },
-                            },
-                        },
-                    });
-                } else {
-                    stochasticChart.data.labels = labels;
-                    stochasticChart.data.datasets[0].data = stochasticK;
-                    stochasticChart.data.datasets[1].data = stochasticD;
-                    stochasticChart.update();
-                }
-            }
-        });
-
-
-
+        })
 
 
         // 버튼 기능 
         document.addEventListener('DOMContentLoaded', function () {
         const fetchDataButton = document.getElementById('fetch-data-btn');
         const techDataButton = document.getElementById('tech-data-btn');
+        const marketDataButton = document.getElementById('market-data-btn');
         const tickerNameDataButton = document.getElementById('ticker-name-data-btn');
-        const stockSymbolInput = document.getElementById('stock-symbol');
-
+        
         // 1. Ticker Data Load 버튼
         fetchDataButton.addEventListener('click', function () {
             fetch('/save-data/')
@@ -374,7 +172,22 @@
                 });
         });
 
-        // 2. Stock Price Tech Data Load 버튼
+
+        // 2. Market  Data Load 버튼
+        marketDataButton.addEventListener('click', function () {
+            fetch('/market-data/')
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message); // 서버에서 반환한 메시지 출력
+                    console.log('Market Data Loaded:', data); // 데이터를 콘솔에 출력
+                })
+                .catch(error => {
+                    console.error('Error fetching technical data:', error);
+                    alert('Market 데이터를 불러오는 데 실패했습니다.');
+                });
+        });
+
+        // 3. Stock Price Tech Data Load 버튼
         techDataButton.addEventListener('click', function () {
             fetch('/tech-data/')
                 .then(response => response.json())
@@ -401,6 +214,26 @@
                     alert('Ticker/Name 데이터를 불러오는 데 실패했습니다.');
                 });
         });
+
+
+        //5.주식 분석 버튼
+        const ticker = stockSymbolInput.value.trim().toUpperCase();
+        fetch(`/get-data/?ticker=${ticker}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+
+                        // 종목 이름 설정
+                        stockName.textContent = `${data.name} (${data.ticker})`;
+})
+                    .catch(error => {
+                        console.error('Error fetching stock data:', error);
+                        alert('데이터를 가져오는 데 실패했습니다.');
+                    });
+
     });
 </script>
     </script>
